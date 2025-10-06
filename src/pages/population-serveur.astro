@@ -1,0 +1,26 @@
+---
+import Layout from "../layouts/Layout.astro";
+import PlotFigure from "../components/PlotFigure.astro";
+import * as Plot from "@observablehq/plot";
+import population from "../assets/population.json";
+
+// colonnes attendues: "Période", "Sexe", "Âge", "Valeur" (adapte si besoin)
+const annees = [...new Set(population.map(d => d["Période"]))].reverse();
+const annee = annees[0]; // première année (la plus récente)
+const rows = population.filter(d => d["Période"] === annee);
+
+const options = {
+  height: 420,
+  x: { label: "Âge" },
+  y: { label: "Population", grid: true },
+  color: { label: "Sexe", legend: true, scheme: "Tableau10" },
+  marks: [
+    Plot.barY(rows, { x: "Âge", y: "Valeur", fill: "Sexe", tip: true })
+  ]
+};
+---
+
+<Layout title="TP7 — Population (rendu serveur)">
+  <h1 class="text-2xl mb-2">Population — année {annee}</h1>
+  <PlotFigure {options} />
+</Layout>

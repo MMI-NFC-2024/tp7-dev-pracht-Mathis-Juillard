@@ -1,0 +1,87 @@
+---
+import Layout from "../layouts/Layout.astro";
+import population from "../assets/population.json";
+
+const listePeriode = [...new Set(population.map(d => d["Période"]))].reverse();
+const listeSexe    = [...new Set(population.map(d => d["Sexe"]).filter(Boolean))];
+const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))];
+---
+
+<Layout title="TP7 — Population (client)">
+  <h1 class="text-2xl mb-4">Population — filtres (année / sexe / âge)</h1>
+
+  <form class="flex flex-wrap gap-4 items-end mb-4">
+    <label class="flex flex-col gap-1">
+      <span>Année</span>
+      <select id="periode" class="px-3 py-2 rounded border">
+        {listePeriode.map((p, i) => <option selected={i === 0} value={p}>{p}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Sexe</span>
+      <select id="sexe" class="px-3 py-2 rounded border">
+        <option value="">Tous</option>
+        {listeSexe.map(s => <option value={s}>{s}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Âge</span>
+      <select id="age" class="px-3 py-2 rounded border">
+        <option value="">Tous</option>
+        {listeAge.map(a => <option value={a}>{a}</option>)}
+      </select>
+    </label>
+  </form>
+
+  <div id="vis" class="rounded-xl overflow-hidden border"></div>
+
+  <script type="module">
+    import * as Plot from "@observablehq/plot";
+    import data from "../assets/populationMain.json";
+
+    const $vis = document.querySelector("#vis");
+    const $periode = document.querySelector("#periode");
+    const $sexe = document.querySelector("#sexe");
+    const $age = document.querySelector("#age");
+
+    function filtreRows() {
+      const annee = Number($periode.value);
+      const sexe  = $sexe.value;
+      const age   = $age.value;
+
+      return data.filter(d =>
+        (d["Période"] === annee) &&
+        (sexe === "" || d["Sexe"] === sexe) &&
+        (age  === "" || String(d["Âge"]) === String(age))
+      );
+    }
+
+    function render() {
+      const rows = filtreRows();
+      $vis.innerHTML = "";
+
+      const plot = Plot.plot({
+        height: 420,
+        x: { label: "Âge" },
+        y: { label: "Population", grid: true },
+        color: { label: "Sexe", legend: true, scheme: "Tableau10" },
+        marks: [
+          // si "Âge" unique sélectionné → barres par sexe ; sinon barres par âge colorées par sexe
+          rows.length && ($age.value !== "" && $sexe.value === "")
+            ? Plot.barY(rows, { x: "Sexe", y: "Valeur", fill: "Sexe", tip: true })
+            : Plot.barY(rows, { x: "Âge", y: "Valeur", fill: "Sexe", tip: true })
+        ]
+      });
+
+      $vis.append(plot);
+    }
+
+    $periode.addEventListener("change", render);
+    $sexe.addEventListener("change", render);
+    $age.addEventListener("change", render);
+
+    render();
+  </script>
+</Layout>
