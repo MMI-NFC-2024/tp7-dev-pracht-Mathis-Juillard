@@ -2,9 +2,9 @@
 import Layout from "../layouts/Layout.astro";
 import population from "../assets/population.json";
 
-const listePeriode = [...new Set(population.map(d => d["Période"]))].reverse();
+const listePeriode = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
 const listeSexe    = [...new Set(population.map(d => d["Sexe"]).filter(Boolean))];
-const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))];
+const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !== "Total"))];
 ---
 
 <Layout title="TP7 — Population (client)">
@@ -39,7 +39,7 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
 
   <script type="module">
     import * as Plot from "@observablehq/plot";
-    import data from "../assets/populationMain.json";
+    import data from "../assets/population.json";
 
     const $vis = document.querySelector("#vis");
     const $periode = document.querySelector("#periode");
@@ -51,11 +51,15 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
       const sexe  = $sexe.value;
       const age   = $age.value;
 
-      return data.filter(d =>
-        (d["Période"] === annee) &&
-        (sexe === "" || d["Sexe"] === sexe) &&
-        (age  === "" || String(d["Âge"]) === String(age))
-      );
+      return data
+        .filter(d =>
+          d["Période"] === annee &&
+          (sexe === "" || d["Sexe"] === sexe) &&
+          (age  === "" || String(d["Âge"]) === String(age)) &&
+          d["Âge"] !== "Total" &&
+          d["Valeur"] != null
+        )
+        .map(d => ({ ...d, Valeur: Number(d["Valeur"]) }));
     }
 
     function render() {
@@ -68,8 +72,7 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
         y: { label: "Population", grid: true },
         color: { label: "Sexe", legend: true, scheme: "Tableau10" },
         marks: [
-          // si "Âge" unique sélectionné → barres par sexe ; sinon barres par âge colorées par sexe
-          rows.length && ($age.value !== "" && $sexe.value === "")
+          ($age.value !== "" && $sexe.value === "")
             ? Plot.barY(rows, { x: "Sexe", y: "Valeur", fill: "Sexe", tip: true })
             : Plot.barY(rows, { x: "Âge", y: "Valeur", fill: "Sexe", tip: true })
         ]

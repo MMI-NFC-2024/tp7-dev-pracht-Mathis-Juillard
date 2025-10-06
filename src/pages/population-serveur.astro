@@ -4,12 +4,22 @@ import PlotFigure from "../components/PlotFigure.astro";
 import * as Plot from "@observablehq/plot";
 import population from "../assets/population.json";
 
-// colonnes attendues: "Période", "Sexe", "Âge", "Valeur" (adapte si besoin)
-const annees = [...new Set(population.map(d => d["Période"]))].reverse();
-const annee = annees[0]; // première année (la plus récente)
-const rows = population.filter(d => d["Période"] === annee);
+// Années disponibles
+const annees = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
+const annee = annees[0];   // plus récente
+
+// Lignes pour cette année, pas les "Total" d'âge
+const rows = population
+  .filter(d =>
+    d["Période"] === annee &&
+    d["Sexe"] !== undefined &&
+    d["Âge"]  !== "Total" &&
+    d["Valeur"] != null
+  )
+  .map(d => ({ ...d, Valeur: Number(d["Valeur"]) }));
 
 const options = {
+  width: 900,
   height: 420,
   x: { label: "Âge" },
   y: { label: "Population", grid: true },
@@ -20,7 +30,7 @@ const options = {
 };
 ---
 
-<Layout title="TP7 — Population (rendu serveur)">
+<Layout title={`TP7 — Population (serveur) ${annee}`}>
   <h1 class="text-2xl mb-2">Population — année {annee}</h1>
   <PlotFigure {options} />
 </Layout>
