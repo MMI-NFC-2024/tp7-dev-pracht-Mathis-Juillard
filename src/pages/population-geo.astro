@@ -1,0 +1,132 @@
+---
+import Layout from "../layouts/Layout.astro";
+import detailPopRaw from "../assets/detail_pop.json";               // <- TON CSV/JSON détaillé
+import geoRaw from "../assets/departementsGeoJSON.json";            // <- TON GEOJSON
+
+// Listes pour les select (côté serveur)
+const periodes = [...new Set(detailPopRaw.map(d => +d["Période"]))].sort((a,b)=>b-a);
+const sexes    = [...new Set(detailPopRaw.map(d => d["Sexe"]))];
+const ages     = [...new Set(detailPopRaw.map(d => String(d["Âge"])))];
+
+const defaultYear = periodes[0];
+const defaultSex  = "Total";
+const defaultAge  = "Total";
+---
+
+<Layout title="Population — carte par département (client)">
+  <h1 class="text-2xl mb-4">Population — carte par département</h1>
+
+  <form class="flex flex-wrap gap-4 items-end mb-4">
+    <label class="flex flex-col gap-1">
+      <span>Année</span>
+      <select id="periode" class="px-3 py-2 rounded border">
+        {periodes.map(p => <option value={p} selected={p===defaultYear}>{p}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Sexe</span>
+      <select id="sexe" class="px-3 py-2 rounded border">
+        {sexes.map(s => <option value={s} selected={s===defaultSex}>{s}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Âge</span>
+      <select id="age" class="px-3 py-2 rounded border">
+        {ages.map(a => <option value={a} selected={a===defaultAge}>{a}</option>)}
+      </select>
+    </label>
+  </form>
+
+  <div id="carte" class="rounded-xl overflow-hidden border min-h-[560px]"></div>
+
+  <script type="module">
+    import * as Plot from "@observablehq/plot";
+    import detailPopRaw from "../assets/detail_pop.json";
+    import geoRaw from "../assets/departementsGeoJSON.json";
+
+    // 1) Normalisation des données
+    const data = detailPopRaw.map(d => ({
+      ...d,
+      Période: +d["Période"],
+      Valeur:  +d["Valeur"] || 0,
+      Âge:     String(d["Âge"]),
+      Géographie: d["Géographie"]
+    }));
+
+    // 2) Normalisation GeoJSON + accès au nom du département
+    const geo = geoRaw && geoRaw.type ? geoRaw
+      : { type: "FeatureCollection", features: Array.isArray(geoRaw) ? geoRaw : [] };
+
+    const getDeptName = (feat) =>
+      feat?.properties?.nom ?? feat?.properties?.NOM ?? feat?.properties?.name ?? "";
+
+    // 3) DOM
+    const $carte   = document.querySelector("#carte");
+    const $periode = document.querySelector("#periode");
+    const $sexe    = document.querySelector("#sexe");
+    const $age     = document.querySelector("#age");
+
+    const fmt = new Intl.NumberFormat("fr-FR");
+
+    function valeurPour(dept, year, sex, age) {
+      const row = data.find(p =>
+        p.Géographie === dept &&
+        p.Période    === year &&
+        p.Sexe       === sex &&
+        String(p.Àge ?? p["Âge"]) === String(age)
+      );
+      if (!row) {
+        console.debug("Pas de valeur pour:", { dept, year, sex, age });
+        return 0;
+      }
+      return row.Valeur;
+    }
+
+    function render() {
+      const year = +$periode.value;
+      const sex  = $sexe.value;
+      const age  = $age.value;
+
+      $carte.innerHTML = "";
+
+      const plot = Plot.plot({
+        title: `Population ${year} — ${sex} / ${age}`,
+        ariaLabel: "Carte choroplèthe de la population par département",
+        height: 560,
+        projection: { type: "mercator", domain: geo },  // <- centré sur la France
+        color: {
+          type: "quantile",
+          n: 8,
+          scheme: "blues",
+          label: "Population (× 10⁵)",
+          legend: true,
+          transform: d => Math.round(d / 100_000)
+        },
+        marks: [
+          // Remplissage par valeurs
+          Plot.geo(geo, {
+            fill: (f) => valeurPour(getDeptName(f), year, sex, age),
+            title: (f) => {
+              const nom = getDeptName(f);
+              const v = valeurPour(nom, year, sex, age);
+              return `${nom} : ${fmt.format(v)}`;
+            },
+            tip: true
+          }),
+          // Contours — s'affichent même si toutes les valeurs sont 0
+          Plot.geo(geo, { stroke: "#64748b", strokeOpacity: 0.8 })
+        ]
+      });
+
+      $carte.append(plot);
+    }
+
+    $periode.addEventListener("change", render);
+    $sexe.addEventListener("change", render);
+    $age.addEventListener("change", render);
+
+    render();
+  </script>
+</Layout>
