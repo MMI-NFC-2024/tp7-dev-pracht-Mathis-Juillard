@@ -1,19 +1,27 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import detailPopRaw from "../assets/detail_pop.json";               // <- TON CSV/JSON détaillé
-import geoRaw from "../assets/departementsGeoJSON.json";            // <- TON GEOJSON
 
-// Listes pour les select (côté serveur)
-const periodes = [...new Set(detailPopRaw.map(d => +d["Période"]))].sort((a,b)=>b-a);
-const sexes    = [...new Set(detailPopRaw.map(d => d["Sexe"]))];
-const ages     = [...new Set(detailPopRaw.map(d => String(d["Âge"])))];
+import detailPopRaw from "../assets/detail_pop.json";
+
+const dataSrv = detailPopRaw.map(d => ({
+  ...d,
+  Période: +d["Période"],
+  Valeur:  +d["Valeur"] || 0,
+  Sexe:    String(d["Sexe"] ?? "").trim(),
+  Âge:     String(d["Âge"] ?? "").trim(),
+  Géographie: String(d["Géographie"] ?? "").trim(),
+}));
+
+const periodes = [...new Set(dataSrv.map(d => d.Période))].sort((a,b)=>b-a);
+const sexes    = [...new Set(dataSrv.map(d => d.Sexe))];
+const ages     = [...new Set(dataSrv.map(d => d["Âge"]))];
 
 const defaultYear = periodes[0];
-const defaultSex  = "Total";
-const defaultAge  = "Total";
+const defaultSex  = sexes.includes("Total") ? "Total" : sexes[0];
+const defaultAge  = ages.includes("Total")  ? "Total"  : ages[0];
 ---
 
-<Layout title="Population — carte par département (client)">
+<Layout title="Population — carte par département">
   <h1 class="text-2xl mb-4">Population — carte par département</h1>
 
   <form class="flex flex-wrap gap-4 items-end mb-4">
@@ -43,26 +51,27 @@ const defaultAge  = "Total";
 
   <script type="module">
     import * as Plot from "@observablehq/plot";
+    import { toWgs84 } from "@turf/projection";
+
     import detailPopRaw from "../assets/detail_pop.json";
     import geoRaw from "../assets/departementsGeoJSON.json";
 
-    // 1) Normalisation des données
     const data = detailPopRaw.map(d => ({
-      ...d,
       Période: +d["Période"],
       Valeur:  +d["Valeur"] || 0,
-      Âge:     String(d["Âge"]),
-      Géographie: d["Géographie"]
+      Sexe:    String(d["Sexe"] ?? "").trim(),
+      Âge:     String(d["Âge"] ?? "").trim(),
+      Géographie: String(d["Géographie"] ?? "").trim(),
     }));
 
-    // 2) Normalisation GeoJSON + accès au nom du département
-    const geo = geoRaw && geoRaw.type ? geoRaw
-      : { type: "FeatureCollection", features: Array.isArray(geoRaw) ? geoRaw : [] };
+    const geoSrc = geoRaw?.type ? geoRaw : { type:"FeatureCollection", features:Array.isArray(geoRaw)?geoRaw:[] };
 
-    const getDeptName = (feat) =>
-      feat?.properties?.nom ?? feat?.properties?.NOM ?? feat?.properties?.name ?? "";
+    
+    let geo = geoSrc;
+    try { geo = toWgs84(geoSrc); } catch(e) { /* ignore, c'est déjà OK */ }
 
-    // 3) DOM
+    const getDeptName = f => f?.properties?.nom ?? f?.properties?.NOM ?? f?.properties?.name ?? "";
+
     const $carte   = document.querySelector("#carte");
     const $periode = document.querySelector("#periode");
     const $sexe    = document.querySelector("#sexe");
@@ -70,19 +79,12 @@ const defaultAge  = "Total";
 
     const fmt = new Intl.NumberFormat("fr-FR");
 
-    function valeurPour(dept, year, sex, age) {
+    const valeurPour = (dept, year, sex, age) => {
       const row = data.find(p =>
-        p.Géographie === dept &&
-        p.Période    === year &&
-        p.Sexe       === sex &&
-        String(p.Àge ?? p["Âge"]) === String(age)
+        p.Géographie === dept && p.Période === year && p.Sexe === sex && p["Âge"] === String(age)
       );
-      if (!row) {
-        console.debug("Pas de valeur pour:", { dept, year, sex, age });
-        return 0;
-      }
-      return row.Valeur;
-    }
+      return row ? row.Valeur : 0;
+    };
 
     function render() {
       const year = +$periode.value;
@@ -91,32 +93,35 @@ const defaultAge  = "Total";
 
       $carte.innerHTML = "";
 
+      const values = geo.features.map(f => valeurPour(getDeptName(f), year, sex, age));
+      const allZero = values.every(v => v === 0);
+
       const plot = Plot.plot({
         title: `Population ${year} — ${sex} / ${age}`,
         ariaLabel: "Carte choroplèthe de la population par département",
         height: 560,
-        projection: { type: "mercator", domain: geo },  // <- centré sur la France
-        color: {
-          type: "quantile",
-          n: 8,
-          scheme: "blues",
-          label: "Population (× 10⁵)",
-          legend: true,
-          transform: d => Math.round(d / 100_000)
-        },
+        projection: { type: "mercator", domain: geo },
+        color: allZero
+          ? { legend: false }
+          : {
+              type: "quantile",
+              n: 8,
+              scheme: "blues",
+              label: "Population (×10⁵)",
+              legend: true,
+              transform: d => Math.round(d / 100_000)
+            },
         marks: [
-          // Remplissage par valeurs
           Plot.geo(geo, {
-            fill: (f) => valeurPour(getDeptName(f), year, sex, age),
-            title: (f) => {
+            fill: f => valeurPour(getDeptName(f), year, sex, age),
+            title: f => {
               const nom = getDeptName(f);
               const v = valeurPour(nom, year, sex, age);
               return `${nom} : ${fmt.format(v)}`;
             },
             tip: true
           }),
-          // Contours — s'affichent même si toutes les valeurs sont 0
-          Plot.geo(geo, { stroke: "#64748b", strokeOpacity: 0.8 })
+          Plot.geo(geo, { stroke: "#64748b", strokeOpacity: 0.9 })
         ]
       });
 
@@ -126,7 +131,6 @@ const defaultAge  = "Total";
     $periode.addEventListener("change", render);
     $sexe.addEventListener("change", render);
     $age.addEventListener("change", render);
-
     render();
   </script>
 </Layout>
