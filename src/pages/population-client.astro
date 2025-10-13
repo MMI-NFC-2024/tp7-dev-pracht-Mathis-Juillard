@@ -1,8 +1,8 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import population from "../assets/population.json";
+import population from "../assets/population.json"; // chargé côté serveur
 
-// Listes pour les menus
+// Menus
 const listePeriode = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
 const listeSexe    = [...new Set(population.map(d => d["Sexe"]).filter(Boolean))];
 const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))];
@@ -19,7 +19,7 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
       </select>
     </label>
 
-    <!-- Ces deux menus n’agissent que si le JSON contient autre chose que “Total” -->
+    <!-- Ces 2 menus n’agissent que si le JSON contient autre chose que “Total” -->
     <label class="flex flex-col gap-1">
       <span>Sexe</span>
       <select id="sexe" class="px-3 py-2 rounded border">
@@ -39,13 +39,19 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
 
   <div id="vis" class="rounded-xl overflow-hidden border min-h-[520px]"></div>
 
+  <!-- On passe les données au client proprement -->
+  <script id="DATA" type="application/json">
+    {JSON.stringify(population)}
+  </script>
+
   <script type="module">
     import * as Plot from "@observablehq/plot";
-    import dataRaw from "../assets/population.json";
 
-    // Valeurs numériques robustes (supprime les espaces, gère chaînes)
+    const RAW = JSON.parse(document.getElementById("DATA").textContent);
+
+    // Parser robuste (gère espaces insécables, virgules)
     const toNumber = v => Number(String(v).replace(/\s/g, "").replace(",", "."));
-    const data = dataRaw.map(d => ({ ...d, Valeur: toNumber(d["Valeur"]) || 0 }));
+    const data = RAW.map(d => ({ ...d, Valeur: toNumber(d["Valeur"]) || 0 }));
 
     const $vis = document.querySelector("#vis");
     const $periode = document.querySelector("#periode");
@@ -65,12 +71,12 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
     }
 
     function render() {
-      // Avec ton jeu de données actuel → totaux par département
+      // Avec ton JSON actuel → totaux par département
       const rows = filtreRows()
         .filter(d => d["Sexe"] === "Total" && d["Âge"] === "Total")
         .map(d => ({ dep: d["Géographie"], val: d["Valeur"] }))
         .sort((a, b) => b.val - a.val)
-        .slice(0, 30);
+        .slice(0, 30); // Top 30
 
       $vis.innerHTML = "";
 
