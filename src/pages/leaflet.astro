@@ -1,42 +1,147 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import "leaflet/dist/leaflet.css";
+
+// listes pour les menus (construites côté serveur pour éviter de faire du JS inutile côté client)
+import population from "../assets/population.json";
+
+const annees = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
+const sexes  = [...new Set(population.map(d => d["Sexe"]))];      // dans ton CSV: "Total" uniquement (mais on prépare)
+const ages   = [...new Set(population.map(d => d["Âge"]))];       // idem
+
+const anneeDef = annees[0] ?? 2021;
+const sexeDef  = sexes.includes("Total") ? "Total" : sexes[0];
+const ageDef   = ages.includes("Total")  ? "Total"  : ages[0];
 ---
 
 <Layout title="TP7 — Carte Leaflet">
-  <h1 class="text-2xl mb-4">Leaflet — Départements / Population 2021</h1>
+  <h1 class="text-2xl mb-4">Leaflet — Départements / Population {anneeDef}</h1>
 
-  <!-- Un seul conteneur, avec une vraie hauteur -->
+  <!-- Filtres -->
+  <form class="flex gap-4 items-end mb-4">
+    <label class="flex flex-col gap-1">
+      <span>Année</span>
+      <select id="year" class="px-3 py-2 rounded border">
+        {annees.map((y, i) => <option value={y} selected={i===0}>{y}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Sexe</span>
+      <select id="sex" class="px-3 py-2 rounded border">
+        {sexes.map(s => <option value={s} selected={s===sexeDef}>{s}</option>)}
+      </select>
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span>Âge</span>
+      <select id="age" class="px-3 py-2 rounded border">
+        {ages.map(a => <option value={a} selected={a===ageDef}>{a}</option>)}
+      </select>
+    </label>
+  </form>
+
+  <!-- La carte -->
   <div id="map" style="height:600px;border-radius:12px;overflow:hidden"></div>
 
   <script type="module">
-    // On charge Leaflet et ses icônes côté client
-    const start = async () => {
-      const { default: L } = await import("leaflet");
-      const iconUrl       = (await import("leaflet/dist/images/marker-icon.png")).default;
-      const iconRetinaUrl = (await import("leaflet/dist/images/marker-icon-2x.png")).default;
-      const shadowUrl     = (await import("leaflet/dist/images/marker-shadow.png")).default;
-      L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl });
+    import L from "leaflet";
+    import departements from "../assets/departementsGeoJSON.json";
+    import rows from "../assets/population.json";
 
-      const map = L.map("map", { zoomControl: true }).setView([46.6033, 1.883], 6);
+    // --- helpers --------------------------------------------------------------
+    const $year = document.querySelector("#year");
+    const $sex  = document.querySelector("#sex");
+    const $age  = document.querySelector("#age");
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      }).addTo(map);
+    // index rapide: clef = "Département|Année|Sexe|Âge" -> valeur
+    const idx = new Map(
+      rows.map(d => [
+        `${d["Géographie"]}|${d["Période"]}|${d["Sexe"]}|${d["Âge"]}`,
+        Number(d["Valeur"]) || 0
+      ])
+    );
 
-      L.marker([46.6033, 1.883]).addTo(map).bindPopup("Centre de la France");
-      L.control.scale().addTo(map);
+    const valueFor = (dept, y, s, a) => idx.get(`${dept}|${y}|${s}|${a}`) ?? 0;
 
-      // au cas où
-      requestAnimationFrame(() => map.invalidateSize());
-    };
+    // palette "Blues" (8 classes)
+    const BLUES = ["#f7fbff","#deebf7","#c6dbef","#9ecae1","#6baed6","#4292c6","#2171b5","#084594"];
 
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", start, { once: true });
-    } else {
-      start();
+    function computeBreaks(y, s, a) {
+      const vals = departements.features.map(f => valueFor(f.properties.nom, y, s, a)).filter(v => v>0).sort((a,b)=>a-b);
+      if (!vals.length) return [0,1,2,3,4,5,6];
+      const q = p => vals[Math.floor((vals.length-1)*p)];
+      return [q(.05), q(.2), q(.35), q(.5), q(.65), q(.8), q(.95)];
     }
+
+    function colorFor(v, brk) {
+      // renvoie une couleur en fonction des seuils (quantiles)
+      let i = 0;
+      while (i < brk.length && v > brk[i]) i++;
+      return BLUES[Math.min(i, BLUES.length-1)];
+    }
+
+    // --- carte ---------------------------------------------------------------
+    const map = L.map("map", { zoomControl: true }).setView([46.6033, 1.883], 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    L.control.scale().addTo(map);
+
+    let breaks = computeBreaks($year.value, $sex.value, $age.value);
+
+    const geo = L.geoJSON(departements, {
+      style: f => {
+        const v = valueFor(f.properties.nom, Number($year.value), $sex.value, $age.value);
+        return { color:"#999", weight:1, fillOpacity:.9, fillColor: colorFor(v, breaks) };
+      },
+      onEachFeature: (f, layer) => {
+        layer.bindTooltip(
+          `<strong>${f.properties.nom}</strong><br>${(valueFor(f.properties.nom, Number($year.value), $sex.value, $age.value)).toLocaleString("fr-FR")} hab.`,
+          { sticky: true }
+        );
+      }
+    }).addTo(map);
+
+    // légende simple
+    const legend = L.control({position:"topright"});
+    legend.onAdd = function () {
+      const div = L.DomUtil.create("div", "leaflet-bar p-2");
+      div.style.background = "rgba(0,0,0,.4)";
+      div.style.color = "white";
+      div.style.borderRadius = "8px";
+      const items = [0, ...breaks].map((b,i) => {
+        const to = breaks[i] ?? "max";
+        const label = i === 0 ? `≤ ${Math.round(breaks[0]).toLocaleString("fr-FR")}` :
+                     (to==="max" ? `> ${Math.round(b).toLocaleString("fr-FR")}`
+                                 : `${Math.round(b).toLocaleString("fr-FR")} – ${Math.round(to).toLocaleString("fr-FR")}`);
+        const color = BLUES[i];
+        return `<div style="display:flex;align-items:center;gap:.5rem;margin:.15rem 0">
+                  <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${color}"></span>
+                  <span>${label}</span>
+                </div>`;
+      }).join("");
+      div.innerHTML = `<div style="font-weight:600;margin-bottom:.25rem">Population</div>${items}`;
+      return div;
+    };
+    legend.addTo(map);
+
+    function refresh() {
+      breaks = computeBreaks(Number($year.value), $sex.value, $age.value);
+      geo.setStyle(f => {
+        const v = valueFor(f.properties.nom, Number($year.value), $sex.value, $age.value);
+        return { color:"#999", weight:1, fillOpacity:.9, fillColor: colorFor(v, breaks) };
+      });
+      legend.remove();
+      legend.addTo(map);
+    }
+
+    $year.addEventListener("change", refresh);
+    $sex.addEventListener("change", refresh);
+    $age.addEventListener("change", refresh);
+
+    // si la map était cachée lors du montage
+    requestAnimationFrame(() => map.invalidateSize());
   </script>
 </Layout>

@@ -1,11 +1,13 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import population from "../assets/population.json"; // chargé côté serveur
+import population from "../assets/population.json";
 
-// Menus
-const listePeriode = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
-const listeSexe    = [...new Set(population.map(d => d["Sexe"]).filter(Boolean))];
-const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))];
+// menus (côté serveur)
+const annees = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
+const sexes  = [...new Set(population.map(d => d["Sexe"]))];
+const ages   = [...new Set(population.map(d => d["Âge"]))];
+
+const anneeDef = annees[0];
 ---
 
 <Layout title="TP7 — Population (client)">
@@ -15,16 +17,15 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
     <label class="flex flex-col gap-1">
       <span>Année</span>
       <select id="periode" class="px-3 py-2 rounded border">
-        {listePeriode.map((p, i) => <option selected={i === 0} value={p}>{p}</option>)}
+        {annees.map((y, i) => <option value={y} selected={i===0}>{y}</option>)}
       </select>
     </label>
 
-    <!-- Ces 2 menus n’agissent que si le JSON contient autre chose que “Total” -->
     <label class="flex flex-col gap-1">
       <span>Sexe</span>
       <select id="sexe" class="px-3 py-2 rounded border">
         <option value="">Tous</option>
-        {listeSexe.map(s => <option value={s}>{s}</option>)}
+        {sexes.map(s => <option value={s}>{s}</option>)}
       </select>
     </label>
 
@@ -32,79 +33,75 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))
       <span>Âge</span>
       <select id="age" class="px-3 py-2 rounded border">
         <option value="">Tous</option>
-        {listeAge.map(a => <option value={a}>{a}</option>)}
+        {ages.map(a => <option value={a}>{a}</option>)}
       </select>
     </label>
   </form>
 
-  <div id="vis" class="rounded-xl overflow-hidden border min-h-[520px]"></div>
-
-  <!-- On passe les données au client proprement -->
-  <script id="DATA" type="application/json">
-    {JSON.stringify(population)}
-  </script>
+  <div id="vis" class="rounded-xl overflow-hidden border min-h-[460px]"></div>
 
   <script type="module">
     import * as Plot from "@observablehq/plot";
+    import raw from "../assets/population.json";
 
-    const RAW = JSON.parse(document.getElementById("DATA").textContent);
-
-    // Parser robuste (gère espaces insécables, virgules)
-    const toNumber = v => Number(String(v).replace(/\s/g, "").replace(",", "."));
-    const data = RAW.map(d => ({ ...d, Valeur: toNumber(d["Valeur"]) || 0 }));
+    const data = raw.map(d => ({ ...d, Valeur: +d["Valeur"] || 0 }));
 
     const $vis = document.querySelector("#vis");
-    const $periode = document.querySelector("#periode");
-    const $sexe = document.querySelector("#sexe");
-    const $age = document.querySelector("#age");
+    const $y = document.querySelector("#periode");
+    const $s = document.querySelector("#sexe");
+    const $a = document.querySelector("#age");
 
-    function filtreRows() {
-      const annee = Number($periode.value);
-      const sexe  = $sexe.value;
-      const age   = $age.value;
-
+    function filtered() {
+      const y = Number($y.value);
+      const s = $s.value;
+      const a = $a.value;
       return data.filter(d =>
-        d["Période"] === annee &&
-        (sexe === "" || d["Sexe"] === sexe) &&
-        (age  === "" || String(d["Âge"]) === String(age))
+        d["Période"] === y &&
+        (s === "" || d["Sexe"] === s) &&
+        (a === "" || String(d["Âge"]) === String(a))
       );
     }
 
     function render() {
-      // Avec ton JSON actuel → totaux par département
-      const rows = filtreRows()
-        .filter(d => d["Sexe"] === "Total" && d["Âge"] === "Total")
-        .map(d => ({ dep: d["Géographie"], val: d["Valeur"] }))
-        .sort((a, b) => b.val - a.val)
-        .slice(0, 30); // Top 30
+      const rows = filtered();
 
-      $vis.innerHTML = "";
+      // S’il n’y a que “Total/Total”, on agrège par département
+      const simple = rows.every(d => d["Sexe"] === "Total" && d["Âge"] === "Total");
 
-      if (!rows.length) {
-        $vis.innerHTML = `<div class="p-6 text-slate-400">Aucune donnée pour la combinaison sélectionnée.</div>`;
-        return;
+      let table;
+      if (simple) {
+        table = rows
+          .map(d => ({ dep: d["Géographie"], val: d["Valeur"] }))
+          .sort((a,b)=>b.val-a.val)
+          .slice(0, 30);
+      } else {
+        // sinon on laisse par âge et/ou sexe
+        table = rows.map(d => ({
+          dep: d["Géographie"], age: d["Âge"], sexe: d["Sexe"], val: d["Valeur"]
+        }));
       }
 
+      $vis.innerHTML = "";
       const plot = Plot.plot({
-        title: "Population par département (Top 30)",
+        title: simple
+          ? `Population par département — Top 30`
+          : `Population (détail)`,
         ariaLabel: "Histogramme filtrable de population",
         height: 520,
         marginLeft: 100,
-        marginBottom: 90,
-        x: { label: "Département", tickRotate: -45 },
+        x: { label: simple ? "Département" : "Âge", tickRotate: -45 },
         y: { label: "Population", grid: true, tickFormat: d => d.toLocaleString("fr-FR") },
-        marks: [
-          Plot.barY(rows, { x: "dep", y: "val", tip: true, inset: 0.5 }),
-          Plot.ruleY([0])
-        ]
+        color: simple ? undefined : { label:"Sexe", legend:true, scheme:"Tableau10" },
+        marks: simple
+          ? [ Plot.barY(table, { x:"dep", y:"val", tip:true }), Plot.ruleY([0]) ]
+          : [ Plot.barY(table, { x:"age", y:"val", fill:"sexe", tip:true }), Plot.ruleY([0]) ]
       });
-
       $vis.append(plot);
     }
 
-    $periode.addEventListener("change", render);
-    $sexe.addEventListener("change", render);
-    $age.addEventListener("change", render);
+    $y.addEventListener("change", render);
+    $s.addEventListener("change", render);
+    $a.addEventListener("change", render);
     render();
   </script>
 </Layout>
