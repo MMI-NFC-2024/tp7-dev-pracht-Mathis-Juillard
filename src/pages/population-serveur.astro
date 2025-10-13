@@ -4,33 +4,34 @@ import PlotFigure from "../components/PlotFigure.astro";
 import * as Plot from "@observablehq/plot";
 import population from "../assets/population.json";
 
-// Années disponibles
+// Année la plus récente
 const annees = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
-const annee = annees[0];   // plus récente
+const annee  = annees[0];
 
-// Lignes pour cette année, pas les "Total" d'âge
-const rows = population
-  .filter(d =>
-    d["Période"] === annee &&
-    d["Sexe"] !== undefined &&
-    d["Âge"]  !== "Total" &&
-    d["Valeur"] != null
-  )
-  .map(d => ({ ...d, Valeur: Number(d["Valeur"]) }));
+// Totaux par département
+const toNumber = v => Number(String(v).replace(/\s/g, "").replace(",", "."));
+const rowsAll = population
+  .filter(d => d["Période"] === annee && d["Sexe"] === "Total" && d["Âge"] === "Total")
+  .map(d => ({ dep: d["Géographie"], val: toNumber(d["Valeur"]) || 0 }));
+
+const TOP = 25;
+const rows = rowsAll.sort((a,b)=>b.val - a.val).slice(0, TOP);
 
 const options = {
-  width: 900,
-  height: 420,
-  x: { label: "Âge" },
-  y: { label: "Population", grid: true },
-  color: { label: "Sexe", legend: true, scheme: "Tableau10" },
+  title: `Population — année ${annee} (Top ${TOP})`,
+  subtitle: "Totaux par département (tri décroissant)",
+  ariaLabel: "Bar chart des populations par département",
+  height: 520,
+  marginLeft: 100,
+  marginBottom: 90,
+  x: { label: "Département", tickRotate: -45 },
+  y: { label: "Population", grid: true, tickFormat: d => d.toLocaleString("fr-FR") },
   marks: [
-    Plot.barY(rows, { x: "Âge", y: "Valeur", fill: "Sexe", tip: true })
+    Plot.barY(rows, { x: "dep", y: "val", tip: true, inset: 0.5 }),
+    Plot.ruleY([0])
   ]
 };
 ---
-
-<Layout title={`TP7 — Population (serveur) ${annee}`}>
-  <h1 class="text-2xl mb-2">Population — année {annee}</h1>
+<Layout title="TP7 — Population (serveur)">
   <PlotFigure {options} />
 </Layout>

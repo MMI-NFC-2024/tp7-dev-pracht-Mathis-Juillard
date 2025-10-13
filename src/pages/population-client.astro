@@ -2,9 +2,10 @@
 import Layout from "../layouts/Layout.astro";
 import population from "../assets/population.json";
 
+// Listes pour les menus
 const listePeriode = [...new Set(population.map(d => d["Période"]))].sort((a,b)=>b-a);
 const listeSexe    = [...new Set(population.map(d => d["Sexe"]).filter(Boolean))];
-const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !== "Total"))];
+const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(Boolean))];
 ---
 
 <Layout title="TP7 — Population (client)">
@@ -18,6 +19,7 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !=
       </select>
     </label>
 
+    <!-- Ces deux menus n’agissent que si le JSON contient autre chose que “Total” -->
     <label class="flex flex-col gap-1">
       <span>Sexe</span>
       <select id="sexe" class="px-3 py-2 rounded border">
@@ -35,11 +37,15 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !=
     </label>
   </form>
 
-  <div id="vis" class="rounded-xl overflow-hidden border"></div>
+  <div id="vis" class="rounded-xl overflow-hidden border min-h-[520px]"></div>
 
   <script type="module">
     import * as Plot from "@observablehq/plot";
-    import data from "../assets/population.json";
+    import dataRaw from "../assets/population.json";
+
+    // Valeurs numériques robustes (supprime les espaces, gère chaînes)
+    const toNumber = v => Number(String(v).replace(/\s/g, "").replace(",", "."));
+    const data = dataRaw.map(d => ({ ...d, Valeur: toNumber(d["Valeur"]) || 0 }));
 
     const $vis = document.querySelector("#vis");
     const $periode = document.querySelector("#periode");
@@ -51,30 +57,39 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !=
       const sexe  = $sexe.value;
       const age   = $age.value;
 
-      return data
-        .filter(d =>
-          d["Période"] === annee &&
-          (sexe === "" || d["Sexe"] === sexe) &&
-          (age  === "" || String(d["Âge"]) === String(age)) &&
-          d["Âge"] !== "Total" &&
-          d["Valeur"] != null
-        )
-        .map(d => ({ ...d, Valeur: Number(d["Valeur"]) }));
+      return data.filter(d =>
+        d["Période"] === annee &&
+        (sexe === "" || d["Sexe"] === sexe) &&
+        (age  === "" || String(d["Âge"]) === String(age))
+      );
     }
 
     function render() {
-      const rows = filtreRows();
+      // Avec ton jeu de données actuel → totaux par département
+      const rows = filtreRows()
+        .filter(d => d["Sexe"] === "Total" && d["Âge"] === "Total")
+        .map(d => ({ dep: d["Géographie"], val: d["Valeur"] }))
+        .sort((a, b) => b.val - a.val)
+        .slice(0, 30);
+
       $vis.innerHTML = "";
 
+      if (!rows.length) {
+        $vis.innerHTML = `<div class="p-6 text-slate-400">Aucune donnée pour la combinaison sélectionnée.</div>`;
+        return;
+      }
+
       const plot = Plot.plot({
-        height: 420,
-        x: { label: "Âge" },
-        y: { label: "Population", grid: true },
-        color: { label: "Sexe", legend: true, scheme: "Tableau10" },
+        title: "Population par département (Top 30)",
+        ariaLabel: "Histogramme filtrable de population",
+        height: 520,
+        marginLeft: 100,
+        marginBottom: 90,
+        x: { label: "Département", tickRotate: -45 },
+        y: { label: "Population", grid: true, tickFormat: d => d.toLocaleString("fr-FR") },
         marks: [
-          ($age.value !== "" && $sexe.value === "")
-            ? Plot.barY(rows, { x: "Sexe", y: "Valeur", fill: "Sexe", tip: true })
-            : Plot.barY(rows, { x: "Âge", y: "Valeur", fill: "Sexe", tip: true })
+          Plot.barY(rows, { x: "dep", y: "val", tip: true, inset: 0.5 }),
+          Plot.ruleY([0])
         ]
       });
 
@@ -84,7 +99,6 @@ const listeAge     = [...new Set(population.map(d => d["Âge"]).filter(a => a !=
     $periode.addEventListener("change", render);
     $sexe.addEventListener("change", render);
     $age.addEventListener("change", render);
-
     render();
   </script>
 </Layout>
